@@ -8,9 +8,9 @@ const ROOT = path.resolve(path.dirname(url.fileURLToPath(import.meta.url)), '..'
 const OUT = path.join(ROOT, 'game', 'data');
 fs.mkdirSync(OUT, { recursive: true });
 
-// Mỗi file gốc có dạng window.TEN={...}; (rdata.js có comment đầu file nên tìm '=' đầu tiên vẫn đúng)
+// Mỗi file gốc có dạng window.TEN={...} (rdata.js có comment đầu file nên tìm '=' đầu tiên vẫn đúng)
 function extract(file) {
-  const t = fs.readFileSync(path.join(ROOT, file), 'utf8');
+  const t = fs.readFileSync(path.join(ROOT, 'offline', file), 'utf8');
   const eq = t.indexOf('=');
   return JSON.parse(t.slice(eq + 1).replace(/;\s*$/, ''));
 }

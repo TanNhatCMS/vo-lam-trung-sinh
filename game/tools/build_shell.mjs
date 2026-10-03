@@ -62,6 +62,26 @@ $GODOT_HEAD_INCLUDE
   <div id="err"></div>
   <div class="hint">Mẹo: luyện công vẫn tính khi bạn offline tối đa 8 giờ</div>
 </div>
+<iframe id="oldgame" title="Chế độ chơi offline" src="about:blank"
+  style="display:none; position:fixed; inset:0; width:100%; height:100%; border:0; z-index:50; background:#0b100e;"></iframe>
+<button id="homeBtn" title="Về menu chính"
+  style="display:none; position:fixed; top:10px; left:10px; z-index:51; padding:6px 14px; border-radius:10px;
+         border:1px solid rgba(245,217,126,.5); background:rgba(10,14,12,.85); color:#f5d97e;
+         font-size:14px; cursor:pointer;">⌂ Menu</button>
+<script type="text/javascript">
+// Chế độ chơi offline: nhúng game cũ (được Godot client gọi qua JavaScriptBridge)
+function showOldGame() {
+  const f = document.getElementById('oldgame');
+  if (f.getAttribute('src') === 'about:blank') f.setAttribute('src', '/offline/index.html');
+  f.style.display = 'block';
+  document.getElementById('homeBtn').style.display = 'block';
+}
+function hideOldGame() {
+  document.getElementById('oldgame').style.display = 'none';
+  document.getElementById('homeBtn').style.display = 'none';
+}
+document.getElementById('homeBtn').addEventListener('click', hideOldGame);
+</script>
 <script type="text/javascript" src="$GODOT_URL"></script>
 <script type="text/javascript">
 const GODOT_CONFIG = $GODOT_CONFIG;

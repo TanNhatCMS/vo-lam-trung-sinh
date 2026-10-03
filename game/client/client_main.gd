@@ -27,7 +27,6 @@ var _screens: Dictionary = {}
 
 # refs runtime
 var _boot_status: Label
-var _boot_retry: Button
 var _srv_continue: Button
 var _srv_list_box: VBoxContainer
 var _user_input: LineEdit
@@ -50,8 +49,7 @@ func _ready() -> void:
 	_build_background()
 	_build_screens()
 	_build_net_line()
-	_show(Screen.BOOT)
-	_auto_connect()
+	_show(Screen.BOOT)   # màn chọn chế độ: Online / Offline
 
 # ===================== cấu hình & profile =====================
 
@@ -125,8 +123,7 @@ func _on_connect_failed() -> void:
 	_net_line.text = "✗ Kết nối thất bại"
 	connected_server_id = ""
 	if _screen == Screen.BOOT:
-		_boot_status.text = "Không kết nối được %s" % current_server.get("name", "?")
-		_boot_retry.visible = true
+		_boot_status.text = "Không kết nối được %s — thử lại hoặc chơi Offline" % current_server.get("name", "?")
 	_refresh_server_list()
 
 func _on_disconnected() -> void:
@@ -135,8 +132,7 @@ func _on_disconnected() -> void:
 	chars = []
 	_refresh_server_list()
 	if _screen in [Screen.LOGIN, Screen.CHARS, Screen.CREATE]:
-		_boot_retry.visible = true
-		_boot_status.text = "Mất kết nối — thử lại?"
+		_boot_status.text = "Mất kết nối — chọn Chơi Online để thử lại"
 		_show(Screen.BOOT)
 
 # ===================== vòng đời WebSocket =====================
@@ -270,7 +266,7 @@ func _build_screens() -> void:
 func _build_boot() -> Control:
 	var v := VBoxContainer.new()
 	v.alignment = BoxContainer.ALIGNMENT_CENTER
-	v.add_theme_constant_override("separation", 16)
+	v.add_theme_constant_override("separation", 18)
 	var portrait := TextureRect.new()
 	portrait.texture = load("res://assets/demo/shaolin.png")
 	portrait.custom_minimum_size = Vector2(132, 170)
@@ -279,22 +275,37 @@ func _build_boot() -> Control:
 	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	v.add_child(portrait)
 	v.add_child(_gold_title("Võ Lâm Trùng Sinh", 48))
-	_boot_status = _label("Đang vào giang hồ...", 20)
+	v.add_child(_label("Chọn cách chơi", 18, COL_DIM))
+
+	var online := Button.new()
+	online.text = "  🌐  Chơi Online  "
+	online.add_theme_font_size_override("font_size", 24)
+	online.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	online.pressed.connect(_go_online)
+	v.add_child(online)
+
+	var offline := Button.new()
+	offline.text = "  🏯  Chơi Offline  "
+	offline.add_theme_font_size_override("font_size", 24)
+	offline.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	offline.pressed.connect(_go_offline)
+	v.add_child(offline)
+
+	_boot_status = _label("", 16, COL_DIM)
 	v.add_child(_boot_status)
-	_boot_retry = Button.new()
-	_boot_retry.text = "  Thử lại  "
-	_boot_retry.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_boot_retry.pressed.connect(_auto_connect)
-	_boot_retry.visible = false
-	v.add_child(_boot_retry)
-	var other := Button.new()
-	other.text = "  Chọn máy chủ khác  "
-	other.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	other.pressed.connect(func():
-		_refresh_server_list()
-		_show(Screen.SERVERS))
-	v.add_child(other)
 	return v
+
+func _go_online() -> void:
+	_boot_status.text = "Đang kết nối máy chủ…"
+	_auto_connect()
+
+func _go_offline() -> void:
+	# Chơi Offline = nạp trọn bộ game cũ (single-player, không cần máy chủ game)
+	if OS.has_feature("web"):
+		JavaScriptBridge.eval("showOldGame();", true)
+	else:
+		# Bản native (desktop/Android): mở game cũ trong trình duyệt (chưa bundle offline)
+		OS.shell_open("https://trungsinh.test/offline/")
 
 func _build_servers() -> Control:
 	var p := _panel()
