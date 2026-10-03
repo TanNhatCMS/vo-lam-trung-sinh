@@ -3,6 +3,7 @@
 node_modules/
 *.log
 
-# Godot cache/build
+# Godot cache/build + toolchain cục bộ
 game/.godot/
 game/export/
+.tools/
