@@ -39,16 +39,59 @@ Nâng cấp tab **"Giang hồ"** thành cuốn ký thật sự, ghi lại mọi 
 | Sinh tồn | "Vụn Vỡ" — chốn trùng sinh giả (endless, điểm đổi Ký ức) |
 | Cuối game | Tọa Hóa tầng tầng lớp lớp + tuyến "Viên Mãn" sau N kiếp |
 
-## 4. Kế hoạch kỹ thuật
+## 4. Online & PK/PvP
 
-Engine canvas hoàn chỉnh sẵn có: render (`js/render.js`), chiến đấu (`js/combat.js`), loot/shop/stash, save 3 slot (`js/save.js`), sinh tồn (`js/survival.js`).
+Game phát triển theo hướng **online** (Web/Desktop/Android cùng một server) nhưng vẫn giữ tinh thần idle: luyện công AFK tính offline như cũ, còn **PvP là phần thời gian thực**.
 
-- **Giai đoạn 0 — Nền móng (xong):** định hình thương hiệu, hệ lưu riêng `vlts_*`, repo riêng.
-- **Giai đoạn 1 — Giang Hồ Ký:** module `js/chronicle.js` — event bus ghi sự kiện, UI tab ký, dữ liệu quan hệ NPC trong save v2.
-- **Giai đoạn 2 — Trùng Sinh:** module `js/reincarnate.js` — logic Tọa Hóa, tính Ký ức, shop Ký ức, reset có kiểm soát (giữ stash chung + ký).
-- **Giai đoạn 3 — Nội dung mới:** kịch bản theo kiếp, đại sự giang hồ, Vụn Vỡ, tuyến Viên Mãn.
+### 4.1. Nguyên tắc kiến trúc — server authoritative
 
-## 5. Nguyên tắc
+- **Client chỉ gửi ý định (intent)**: dùng kỹ năng, di chuyển, uống thuốc, chọn mục tiêu... **Server tính mọi kết quả**: damage, loot, chết sống, điểm sát khí. Client không bao giờ tự báo "tao đã giết mày".
+- **Chia sẻ công thức**: combat/chỉ số viết một lần trong `packages/game-core` (TypeScript) — client dùng để dự đoán/hiển thị mượt, server dùng để phán quyết. Không bao giờ hai bộ công thức lệch nhau.
+- **Vùng = 1 phòng**: mỗi ải/khu bản đồ là một **Durable Object** (Cloudflare) giữ trạng thái thời gian thực của những người chơi trong vùng, tick mô phỏng 10–15 lần/giây, phát (broadcast) delta trạng thái qua WebSocket. Vùng trống thì ngủ (hibernation) — không tốn tài nguyên.
+- **Dịch vụ toàn cục** (Worker + D1 + KV): tài khoản, cloud save, bảng xếp hạng, Matchmaking Đấu Võ Đài.
+- **Offline progress** vẫn do client/server tính lại theo timestamp khi đăng nhập — không cần server chạy mô phỏng 24/7 cho phần AFK.
 
-- Không phá save: mọi schema mới đều version + migrate từ phiên bản trước.
-- Giữ tinh thần idle: mọi hệ thống mới phải có phần hưởng lợi khi AFK, không ép online liên tục.
+### 4.2. Thiết kế PK (phong cách võ hiệp cổ điển)
+
+- **Chế độ PK per nhân vật**: *Hòa Bình* (không đánh được người) / *Sát Phạt*. Chỉ bật được Sát Phạt ngoài thành trấn — thành trấn là **vùng an toàn** vĩnh viễn.
+- **Sát khí**: giết người có danh trắng tích điểm sát khí, tên đổi màu dần (trắng → vàng → đỏ). **Hồng danh** bị NPC tuầntra truy sát, và khi chết có xác suất **rớt đồ đang mang** — cái giá của giết chóc.
+- **Nợ máu (bounty)**: nạn nhân có thể treo thưởng; người đanh đỏ danh bị truy nã toàn máy chủ, ai trảm đầu nhận thưởng — ghi thẳng vào **Giang Hồ Ký**.
+- **Đấu Võ Đài**: PvP có tổ chức, 1v1 theo Season, không mất đồ, xếp hạng bảng vàng toàn server (D1). Trảm đầu được ghi danh, thua không mang nợ sát khí.
+- **Quy tắc vàng — PvP không phá Trùng Sinh**: chết do PvP **không** kích hoạt trùng sinh/không mất kiếp (chỉ mất đồ/buff tạm thời); trùng sinh chỉ đến từ Tọa Hóa chủ động hoặc sinh tử trong cốt truyện PvE. PvP là ân oán giang hồ, không phải công cụ phá save của người khác.
+
+### 4.3. Mở rộng tự nhiên về sau
+
+Bang hội (chiến bang trường), đại sự giang hồ đồng bộ toàn server (Đại hội võ lâm theo lịch), thương trường người chơi.
+
+## 5. Kế hoạch kỹ thuật
+
+Monorepo (pnpm workspaces):
+
+```
+packages/game-core   # công thức combat/chỉ số/loot — dùng chung client + server (TS)
+packages/data        # dữ liệu game: item, quái, kỹ năng, bản đồ (JSON)
+apps/web             # client web (Vite + TS, Canvas2D/PixiJS)
+apps/desktop         # Tauri v2 (Windows/Linux)
+apps/android         # Capacitor
+services/api         # Worker + Hono + D1: tài khoản, cloud save, bảng xếp hạng
+services/realtime    # Durable Objects: ZoneRoom (1 vùng = 1 phòng, tick + WebSocket)
+```
+
+Engine canvas hiện có: render (`js/render.js`), chiến đấu (`js/combat.js`), loot/shop/stash, save 3 slot (`js/save.js`), sinh tồn (`js/survival.js`) — migrate dần sang TS trong `game-core`, không viết lại một phát.
+
+Lộ trình:
+
+- **GĐ 0 — Nền móng (xong):** thương hiệu, hệ lưu 3 slot `vlts_*`, repo riêng.
+- **GĐ 1 — Giang Hồ Ký:** `js/chronicle.js` — event bus ghi sự kiện, UI tab ký, quan hệ NPC.
+- **GĐ 2 — Trùng Sinh:** `js/reincarnate.js` — Tọa Hóa, Ký ức tiền thế, prestige loop.
+- **GĐ 3 — Online nền tảng:** TS + monorepo + StorageAdapter; tài khoản + cloud save + bảng xếp hạng (`services/api`, D1); thấy người chơi khác trong ải (`ZoneRoom` DO, chưa combat).
+- **GĐ 4 — PK/PvP:** combat server-authoritative, chế độ PK + sát khí + rớt đồ, Đấu Võ Đài xếp hạng theo mùa.
+- **GĐ 5 — Sâu rộng:** bang hội, đại sự giang hồ toàn server, thương trường.
+
+Chi phí: free tier của Cloudflare đủ cho giai đoạn đầu; khi đông người chơi cần Workers Paid (~$5/tháng) cho Durable Objects không giới hạn + log.
+
+## 6. Nguyên tắc
+
+- **Server phán quyết mọi kết quả combat** — client chỉ gửi ý định và hiển thị.
+- Không phá save: mọi schema mới đều version + migrate từ phiên bản trước; chết PvP không đụng vào tiến trình Trùng Sinh.
+- Giữ tinh thần idle: phần luyện công hưởng lợi khi AFK như cũ; PvP là lựa chọn chủ động của người chơi.
