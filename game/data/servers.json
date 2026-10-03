@@ -1,0 +1,18 @@
+{
+	"default": "local",
+	"servers": [
+		{
+			"id": "local",
+			"name": "Máy cục bộ",
+			"url": "ws://127.0.0.1:9000",
+			"enabled": true
+		},
+		{
+			"id": "vps",
+			"name": "Máy chủ VPS",
+			"url": "ws://127.0.0.1:9000",
+			"enabled": false,
+			"note": "Sửa url thành ws://<ip-vps>:9000 rồi bật enabled"
+		}
+	]
+}
