@@ -9,4 +9,8 @@ services:
       - "9000:9000"
     environment:
       VTS_PORT: "9000"
+      VTS_DATA: "/data"
+    volumes:
+      # dữ liệu tài khoản/nhân vật sống sót qua các lần rebuild container
+      - ../server-data:/data
     restart: unless-stopped

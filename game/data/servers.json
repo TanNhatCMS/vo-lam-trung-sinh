@@ -1,9 +1,15 @@
 {
-	"default": "local",
+	"default": "local-web",
 	"servers": [
 		{
+			"id": "local-web",
+			"name": "Máy chủ Trùng Sinh (Web)",
+			"url": "wss://trungsinh.test/ws",
+			"enabled": true
+		},
+		{
 			"id": "local",
-			"name": "Máy cục bộ",
+			"name": "Máy cục bộ (trực tiếp)",
 			"url": "ws://127.0.0.1:9000",
 			"enabled": true
 		},

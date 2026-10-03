@@ -7,3 +7,6 @@ node_modules/
 game/.godot/
 game/export/
 .tools/
+
+# dữ liệu server chạy cục bộ (tài khoản/nhân vật)
+server-data/

@@ -1,8 +1,8 @@
 extends Control
-## Client Võ Lâm Trùng Sinh (GĐ 0.5):
-##   Boot (tự kết nối server đã lưu/mặc định) → Chọn máy chủ (từ data/servers.json)
-##   → Tạo nhân vật (tên + 10 phái) → Lobby.
-## Packet JSON UTF-8 hai chiều với server, chi tiết trong server/server_main.gd.
+## Client Võ Lâm Trùng Sinh (GĐ 3):
+##   Boot (tự kết nối) → Chọn máy chủ → Đăng nhập / Đăng ký → Chọn nhân vật
+##   → (nút Tạo nhân vật → màn tạo → quay lại chọn nhân vật).
+## Packet JSON UTF-8 hai chiều, chi tiết trong server/server_main.gd.
 
 const SERVER_URL_FALLBACK := "ws://127.0.0.1:9000"
 const PROFILE_PATH := "user://profile.json"
@@ -11,33 +11,41 @@ const NAME_MAX := 12
 
 const COL_GOLD := Color(0.96, 0.85, 0.5)
 const COL_TEXT := Color(0.9, 0.88, 0.8)
+const COL_DIM := Color(0.75, 0.72, 0.62)
+const COL_ERR := Color(1, 0.5, 0.4)
 
-enum Screen { BOOT, SERVERS, CREATE, LOBBY }
+enum Screen { BOOT, SERVERS, LOGIN, CHARS, CREATE }
 
 var servers_cfg: Dictionary = {}
-var profile: Dictionary = {}                 # {"server_id": "...", "char": {...}}
-var current_server: Dictionary = {}          # server đang cố kết nối / đã kết nối
-var connected_server_id := ""                # id server đã kết nối thành công
-var chosen_fac := ""
+var profile: Dictionary = {}           # {"server_id","user","pass","remember","last_char"}
+var current_server: Dictionary = {}
+var connected_server_id := ""
+var chars: Array = []                  # nhân vật của tài khoản đang đăng nhập
+var selected_char := ""
 var _screen := Screen.BOOT
 var _screens: Dictionary = {}
 
-# refs điều khiển runtime
+# refs runtime
 var _boot_status: Label
 var _boot_retry: Button
 var _srv_continue: Button
 var _srv_list_box: VBoxContainer
-var _name_input: LineEdit
+var _user_input: LineEdit
+var _pass_input: LineEdit
+var _remember: CheckButton
+var _login_err: Label
+var _login_btn: Button
+var _char_box: VBoxContainer
 var _create_err: Label
 var _fac_group: ButtonGroup
-var _lobby_card: VBoxContainer
+var _name_input: LineEdit
 var _net_line: Label
 
-var ws: WebSocketPeer = null    # kết nối tới server (WebSocket thô, JSON UTF-8)
+var ws: WebSocketPeer = null    # WebSocket thô — JSON UTF-8
 var _ws_was_open := false
 
 func _ready() -> void:
-	_load_json_cfg()
+	_load_servers_cfg()
 	_load_profile()
 	_build_background()
 	_build_screens()
@@ -47,7 +55,7 @@ func _ready() -> void:
 
 # ===================== cấu hình & profile =====================
 
-func _load_json_cfg() -> void:
+func _load_servers_cfg() -> void:
 	var parsed = JSON.parse_string(FileAccess.get_file_as_string("res://data/servers.json"))
 	if parsed is Dictionary and parsed.has("servers"):
 		servers_cfg = parsed
@@ -110,7 +118,7 @@ func _on_connected() -> void:
 	_save_profile()
 	_net_line.text = "● Đã kết nối: %s" % current_server.get("name", "")
 	if _screen == Screen.BOOT:
-		_show(Screen.SERVERS)      # sau khi kết nối xong → màn chọn server
+		_show(Screen.SERVERS)      # kết nối xong → chọn máy chủ
 	_refresh_server_list()
 
 func _on_connect_failed() -> void:
@@ -124,7 +132,12 @@ func _on_connect_failed() -> void:
 func _on_disconnected() -> void:
 	_net_line.text = "✗ Mất kết nối server"
 	connected_server_id = ""
+	chars = []
 	_refresh_server_list()
+	if _screen in [Screen.LOGIN, Screen.CHARS, Screen.CREATE]:
+		_boot_retry.visible = true
+		_boot_status.text = "Mất kết nối — thử lại?"
+		_show(Screen.BOOT)
 
 # ===================== vòng đời WebSocket =====================
 
@@ -155,34 +168,52 @@ func _send(obj: Dictionary) -> void:
 	if ws != null and ws.get_ready_state() == WebSocketPeer.STATE_OPEN:
 		ws.send_text(JSON.stringify(obj))
 
+# ===================== packets từ server =====================
+
 func _handle(msg: Dictionary) -> void:
 	match msg.get("t", ""):
 		"ping":
 			_net_line.text = "● %s — %d người online" % [current_server.get("name", ""), msg.get("peers", 0)]
-		"char_ok":
-			profile["char"] = {"name": msg.get("name", ""), "fac": msg.get("fac", ""), "fac_name": msg.get("fac_name", "")}
+		"login_ok", "reg_ok_login":
+			pass  # reg_ok đi kèm login_ok riêng bên dưới
+		"reg_ok":
+			pass  # server gửi login_ok ngay sau reg_ok
+		"login_ok":
+			profile["user"] = str(msg.get("user", ""))
+			if _remember.button_pressed:
+				profile["pass"] = _pass_input.text
+			else:
+				profile["pass"] = ""
 			_save_profile()
-			_rebuild_lobby()
-			_show(Screen.LOBBY)
+			chars = msg.get("chars", [])
+			_net_line.text = "● Xin chào %s — %d nhân vật" % [msg.get("user", ""), chars.size()]
+			_show(Screen.CHARS)
+			_rebuild_char_list()
+		"login_err", "reg_err":
+			if _screen == Screen.LOGIN and _login_err != null:
+				_login_err.text = str(msg.get("msg", "Lỗi không rõ"))
+		"char_created":
+			chars = msg.get("chars", [])
+			_show(Screen.CHARS)
+			_rebuild_char_list()
 		"char_err":
 			if _screen == Screen.CREATE and _create_err != null:
 				_create_err.text = str(msg.get("msg", "Lỗi không rõ"))
 
-# ===================== điều hướng màn hình =====================
+# ===================== điều hướng =====================
 
 func _show(s: Screen) -> void:
 	_screen = s
 	for k in _screens:
 		_screens[k].visible = (k == s)
 
-func _go_continue() -> void:
+func _go_login() -> void:
 	if connected_server_id == "":
 		return
-	if profile.get("char", {}).has("name"):
-		_rebuild_lobby()
-		_show(Screen.LOBBY)
-	else:
-		_show(Screen.CREATE)
+	_user_input.text = profile.get("user", "")
+	_pass_input.text = profile.get("pass", "")
+	_login_err.text = " "
+	_show(Screen.LOGIN)
 
 # ===================== dựng UI =====================
 
@@ -228,11 +259,11 @@ func _build_screens() -> void:
 	center.set_anchors_preset(Control.PRESET_FULL_RECT)
 	center.alignment = BoxContainer.ALIGNMENT_CENTER
 	add_child(center)
-
 	_screens[Screen.BOOT] = _build_boot()
 	_screens[Screen.SERVERS] = _build_servers()
+	_screens[Screen.LOGIN] = _build_login()
+	_screens[Screen.CHARS] = _build_chars()
 	_screens[Screen.CREATE] = _build_create()
-	_screens[Screen.LOBBY] = _build_lobby()
 	for k in _screens:
 		center.add_child(_screens[k])
 
@@ -279,7 +310,7 @@ func _build_servers() -> Control:
 	_srv_continue.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	_srv_continue.add_theme_font_size_override("font_size", 22)
 	_srv_continue.disabled = true
-	_srv_continue.pressed.connect(_go_continue)
+	_srv_continue.pressed.connect(_go_login)
 	v.add_child(_srv_continue)
 	return p
 
@@ -303,13 +334,125 @@ func _on_server_button(srv: Dictionary) -> void:
 	_connect_to(srv, Screen.SERVERS)
 	_refresh_server_list()
 
+# ---------- Đăng nhập / Đăng ký ----------
+
+func _build_login() -> Control:
+	var p := _panel()
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	p.add_child(v)
+	v.add_child(_gold_title("Vào game"))
+	v.add_child(_label("Máy chủ: %s" % current_server.get("name", ""), 16, COL_DIM))
+
+	_user_input = LineEdit.new()
+	_user_input.placeholder_text = "Tài khoản"
+	_user_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(_user_input)
+	_pass_input = LineEdit.new()
+	_pass_input.placeholder_text = "Mật khẩu"
+	_pass_input.secret = true
+	_pass_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(_pass_input)
+
+	_remember = CheckButton.new()
+	_remember.text = "Ghi nhớ mật khẩu"
+	_remember.button_pressed = true
+	v.add_child(_remember)
+
+	_login_err = _label(" ", 16, COL_ERR)
+	v.add_child(_login_err)
+
+	_login_btn = Button.new()
+	_login_btn.text = "  Đăng nhập  "
+	_login_btn.add_theme_font_size_override("font_size", 22)
+	_login_btn.pressed.connect(func(): _submit_login("login"))
+	v.add_child(_login_btn)
+	var reg := Button.new()
+	reg.text = "  Chưa có tài khoản? Đăng ký  "
+	reg.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	reg.pressed.connect(func(): _submit_login("register"))
+	v.add_child(reg)
+	var back := Button.new()
+	back.text = "◂ Đổi máy chủ"
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(func():
+		_refresh_server_list()
+		_show(Screen.SERVERS))
+	v.add_child(back)
+	return p
+
+func _submit_login(mode: String) -> void:
+	_login_err.text = " "
+	var user := _user_input.text.strip_edges()
+	var passw := _pass_input.text
+	if user.is_empty() or passw.is_empty():
+		_login_err.text = "Nhập tài khoản và mật khẩu"
+		return
+	_login_btn.disabled = true
+	_send({"t": mode, "user": user, "pass": passw})
+	_login_btn.disabled = false
+
+# ---------- Chọn nhân vật ----------
+
+func _build_chars() -> Control:
+	var p := _panel()
+	var v := VBoxContainer.new()
+	v.add_theme_constant_override("separation", 12)
+	p.add_child(v)
+	v.add_child(_gold_title("Chọn nhân vật"))
+	v.add_child(_label("Tài khoản: %s" % profile.get("user", ""), 16, COL_DIM))
+	_char_box = VBoxContainer.new()
+	_char_box.add_theme_constant_override("separation", 8)
+	v.add_child(_char_box)
+	var mk := Button.new()
+	mk.text = "  ＋ Tạo nhân vật  "
+	mk.add_theme_font_size_override("font_size", 20)
+	mk.pressed.connect(func(): _show(Screen.CREATE))
+	v.add_child(mk)
+	var back := Button.new()
+	back.text = "◂ Đổi máy chủ"
+	back.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	back.pressed.connect(func():
+		_refresh_server_list()
+		_show(Screen.SERVERS))
+	v.add_child(back)
+	return p
+
+func _rebuild_char_list() -> void:
+	if _char_box == null:
+		return
+	for c in _char_box.get_children():
+		c.queue_free()
+	if chars.is_empty():
+		_char_box.add_child(_label("Chưa có nhân vật — hãy tạo một nhân vật mới!", 17, COL_DIM))
+	selected_char = profile.get("last_char", "")
+	for ch in chars:
+		var name := str(ch.get("name", ""))
+		var b := Button.new()
+		b.icon = load("res://assets/portraits/%s.png" % ch.get("fac", "shaolin"))
+		b.add_theme_constant_override("icon_max_width", 44)
+		var mark := "✓ " if name == selected_char else ""
+		b.text = "%s%s — %s (cấp %d)" % [mark, name, ch.get("fac_name", ""), ch.get("lvl", 1)]
+		b.add_theme_font_size_override("font_size", 18)
+		b.pressed.connect(_pick_char.bind(name))
+		_char_box.add_child(b)
+
+func _pick_char(name: String) -> void:
+	selected_char = name
+	profile["last_char"] = name
+	_save_profile()
+	_rebuild_char_list()
+	_net_line.text = "«%s» sẵn sàng — Vào giang hồ sẽ mở ở GĐ 1!" % name
+
+# ---------- Tạo nhân vật ----------
+
 func _build_create() -> Control:
 	var p := _panel()
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 14)
 	p.add_child(v)
 	v.add_child(_gold_title("Tạo nhân vật"))
-	v.add_child(_label("Chọn phái (dữ liệu gốc: 10 môn phái)", 16, Color(0.75, 0.72, 0.62)))
+	v.add_child(_label("Chọn phái (dữ liệu gốc: 10 môn phái)", 16, COL_DIM))
 
 	_fac_group = ButtonGroup.new()
 	var grid := GridContainer.new()
@@ -340,7 +483,7 @@ func _build_create() -> Control:
 	_name_input.alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(_name_input)
 
-	_create_err = _label(" ", 16, Color(1, 0.5, 0.4))
+	_create_err = _label(" ", 16, COL_ERR)
 	v.add_child(_create_err)
 
 	var row := HBoxContainer.new()
@@ -348,10 +491,10 @@ func _build_create() -> Control:
 	row.add_theme_constant_override("separation", 12)
 	v.add_child(row)
 	var back := Button.new()
-	back.text = "◂ Đổi máy chủ"
+	back.text = "◂ Quay lại"
 	back.pressed.connect(func():
-		_refresh_server_list()
-		_show(Screen.SERVERS))
+		_rebuild_char_list()
+		_show(Screen.CHARS))
 	row.add_child(back)
 	var go := Button.new()
 	go.text = "  Tạo nhân vật  "
@@ -371,41 +514,6 @@ func _submit_create() -> void:
 		_create_err.text = "Tên phải từ %d ký tự trở lên" % NAME_MIN
 		return
 	_send({"t": "create_char", "name": char_name, "fac": sel.get_meta("fac")})
-
-func _build_lobby() -> Control:
-	var p := _panel()
-	_lobby_card = VBoxContainer.new()
-	_lobby_card.add_theme_constant_override("separation", 12)
-	p.add_child(_lobby_card)
-	return p
-
-func _rebuild_lobby() -> void:
-	if _lobby_card == null:
-		return
-	for c in _lobby_card.get_children():
-		c.queue_free()
-	var ch: Dictionary = profile.get("char", {})
-	var portrait := TextureRect.new()
-	portrait.texture = load("res://assets/portraits/%s.png" % ch.get("fac", "shaolin"))
-	portrait.custom_minimum_size = Vector2(132, 170)
-	portrait.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	portrait.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	portrait.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	_lobby_card.add_child(portrait)
-	_lobby_card.add_child(_gold_title(str(ch.get("name", "Võ sĩ")), 36))
-	_lobby_card.add_child(_label("%s  •  %s" % [ch.get("fac_name", ""), current_server.get("name", "")], 18))
-	var enter := Button.new()
-	enter.text = "  Vào giang hồ  (GĐ 1 — sắp có)  "
-	enter.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	enter.pressed.connect(func(): _net_line.text = "Thế giới đang được xây... GĐ 1 sẽ mở!")
-	_lobby_card.add_child(enter)
-	var change := Button.new()
-	change.text = "Đổi máy chủ"
-	change.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	change.pressed.connect(func():
-		_refresh_server_list()
-		_show(Screen.SERVERS))
-	_lobby_card.add_child(change)
 
 func _build_net_line() -> void:
 	_net_line = _label("", 16)
