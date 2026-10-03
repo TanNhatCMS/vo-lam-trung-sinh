@@ -1,0 +1,4 @@
+# ZCode/wrangler làm việc nội bộ, không đưa lên repo
+.wrangler/
+node_modules/
+*.log

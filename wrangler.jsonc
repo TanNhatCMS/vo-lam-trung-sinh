@@ -1,0 +1,14 @@
+// Cloudflare Worker phuc vu game Võ Lâm Trùng Sinh (static assets only)
+// Gắn custom domain sau: thêm  "routes": [{ "pattern": "ten-domain", "custom_domain": true }]
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "vo-lam-trung-sinh",
+  "compatibility_date": "2026-10-02",
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "assets": {
+    "directory": ".",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  }
+}
