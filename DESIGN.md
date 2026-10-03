@@ -46,10 +46,10 @@ Game phát triển theo hướng **online** (Web/Desktop/Android cùng một ser
 ### 4.1. Nguyên tắc kiến trúc — server authoritative
 
 - **Client chỉ gửi ý định (intent)**: dùng kỹ năng, di chuyển, uống thuốc, chọn mục tiêu... **Server tính mọi kết quả**: damage, loot, chết sống, điểm sát khí. Client không bao giờ tự báo "tao đã giết mày".
-- **Chia sẻ công thức**: combat/chỉ số viết một lần trong `packages/game-core` (TypeScript) — client dùng để dự đoán/hiển thị mượt, server dùng để phán quyết. Không bao giờ hai bộ công thức lệch nhau.
-- **Vùng = 1 phòng**: mỗi ải/khu bản đồ là một **Durable Object** (Cloudflare) giữ trạng thái thời gian thực của những người chơi trong vùng, tick mô phỏng 10–15 lần/giây, phát (broadcast) delta trạng thái qua WebSocket. Vùng trống thì ngủ (hibernation) — không tốn tài nguyên.
-- **Dịch vụ toàn cục** (Worker + D1 + KV): tài khoản, cloud save, bảng xếp hạng, Matchmaking Đấu Võ Đài.
-- **Offline progress** vẫn do client/server tính lại theo timestamp khi đăng nhập — không cần server chạy mô phỏng 24/7 cho phần AFK.
+- **Chia sẻ công thức**: combat/chỉ số viết một lần trong `game/core/` (GDScript) — client dùng để dự đoán/hiển thị mượt, server dùng để phán quyết. Không bao giờ hai bộ công thức lệch nhau.
+- **Vùng = 1 room**: mỗi ải/khu bản đồ là một room trên **Godot dedicated server** (build headless Linux, chạy trong **Docker trên VPS**), tick mô phỏng 10–15 lần/giây, phát delta trạng thái qua WebSocket; room trống thì giảm tick để tiết kiệm CPU.
+- **Dịch vụ toàn cục trên Cloudflare** (Worker + D1): tài khoản, cloud save, bảng xếp hạng — Godot client gọi REST qua HTTPRequest; static web client vẫn host trên Cloudflare.
+- **Offline progress** vẫn do client/server tính lại theo timestamp khi đăng nhập — không cần VPS chạy mô phỏng 24/7 cho phần AFK.
 
 ### 4.2. Thiết kế PK (phong cách võ hiệp cổ điển)
 
@@ -65,30 +65,33 @@ Bang hội (chiến bang trường), đại sự giang hồ đồng bộ toàn s
 
 ## 5. Kế hoạch kỹ thuật
 
-Monorepo (pnpm workspaces):
+**Core game = Godot 4 (GDScript)** — một project cho cả client và server:
 
 ```
-packages/game-core   # công thức combat/chỉ số/loot — dùng chung client + server (TS)
-packages/data        # dữ liệu game: item, quái, kỹ năng, bản đồ (JSON)
-apps/web             # client web (Vite + TS, Canvas2D/PixiJS)
-apps/desktop         # Tauri v2 (Windows/Linux)
-apps/android         # Capacitor
-services/api         # Worker + Hono + D1: tài khoản, cloud save, bảng xếp hạng
-services/realtime    # Durable Objects: ZoneRoom (1 vùng = 1 phòng, tick + WebSocket)
+game/                    # Godot project (GL Compatibility — nhẹ cho Web/Android)
+  core/                  # combat/stats/db dùng chung client + server
+  client/                # client: export Web, Windows, Linux, Android
+  server/                # dedicated server: WebSocket, 1 vùng = 1 room
+  data/                  # JSON dữ liệu game (convert từ data gốc)
+deploy/                  # Dockerfile + docker-compose — server chạy trên VPS
+services/api             # Cloudflare Worker + Hono + D1: tài khoản, cloud save, bảng xếp hạng
 ```
 
-Engine canvas hiện có: render (`js/render.js`), chiến đấu (`js/combat.js`), loot/shop/stash, save 3 slot (`js/save.js`), sinh tồn (`js/survival.js`) — migrate dần sang TS trong `game-core`, không viết lại một phát.
+- Client export một nút cho Web (WASM), Windows, Linux, Android — không cần lớp bọc Tauri/Capacitor.
+- Dedicated server chạy trong Docker trên VPS (đã có); đứng sau nginx/Caddy với TLS (wss://) khi lên production.
+- Engine JS cũ không mang theo — chỉ mang asset + dữ liệu (đã convert sang `game/data/*.json`) + thiết kế.
 
 Lộ trình:
 
 - **GĐ 0 — Nền móng (xong):** thương hiệu, hệ lưu 3 slot `vlts_*`, repo riêng.
-- **GĐ 1 — Giang Hồ Ký:** `js/chronicle.js` — event bus ghi sự kiện, UI tab ký, quan hệ NPC.
-- **GĐ 2 — Trùng Sinh:** `js/reincarnate.js` — Tọa Hóa, Ký ức tiền thế, prestige loop.
-- **GĐ 3 — Online nền tảng:** TS + monorepo + StorageAdapter; tài khoản + cloud save + bảng xếp hạng (`services/api`, D1); thấy người chơi khác trong ải (`ZoneRoom` DO, chưa combat).
+- **GĐ 0.5 — Core Godot (đang làm):** scaffold project, nạp dữ liệu JSON, khung WebSocket client/server, Docker trên VPS.
+- **GĐ 1 — Giang Hồ Ký:** module chronicle — event bus ghi sự kiện, UI tab ký, quan hệ NPC.
+- **GĐ 2 — Trùng Sinh:** module reincarnate — Tọa Hóa, Ký ức tiền thế, prestige loop.
+- **GĐ 3 — Online nền tảng:** tài khoản + cloud save (`services/api`, D1); thấy người chơi khác trong ải (room server).
 - **GĐ 4 — PK/PvP:** combat server-authoritative, chế độ PK + sát khí + rớt đồ, Đấu Võ Đài xếp hạng theo mùa.
 - **GĐ 5 — Sâu rộng:** bang hội, đại sự giang hồ toàn server, thương trường.
 
-Chi phí: free tier của Cloudflare đủ cho giai đoạn đầu; khi đông người chơi cần Workers Paid (~$5/tháng) cho Durable Objects không giới hạn + log.
+Chi phí: VPS đã có sẵn cho server realtime; Cloudflare free tier đủ cho static client + API giai đoạn đầu.
 
 ## 6. Nguyên tắc
 

@@ -2,3 +2,7 @@
 .wrangler/
 node_modules/
 *.log
+
+# Godot cache/build
+game/.godot/
+game/export/

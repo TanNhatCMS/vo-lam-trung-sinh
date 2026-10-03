@@ -1,0 +1,12 @@
+services:
+  vts-server:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: vts-server:dev
+    container_name: vts-server
+    ports:
+      - "9000:9000"
+    environment:
+      VTS_PORT: "9000"
+    restart: unless-stopped
